@@ -15,6 +15,24 @@ CryoEM (cryo-electron microscopy) determines 3D structures of biological molecul
 
 This repo implements all four steps with a FastAPI wrapper for programmatic access.
 
+```mermaid
+flowchart LR
+    subgraph SIM["simulator/ (known ground truth)"]
+        V["3D asymmetric Gaussian particle<br/>(projector.py)"] --> PR["random rotations,<br/>2D projections placed<br/>in a 512 × 512 micrograph"]
+        PR --> C["apply CTF in Fourier space<br/>(ctf.py)"] --> N["Gaussian noise at SNR 0.1,<br/>optional Poisson (noise.py)"]
+    end
+    subgraph PROC["processor/ Pipeline.run"]
+        B["bandpass filter<br/>(filters.py)"] --> W["Wiener CTF correction<br/>(apply_wiener, default on)"]
+        W --> PK["LoG blob picking<br/>skimage blob_log (picker.py)"]
+        PK --> KM["k-means class averages on<br/>raw patches, no alignment<br/>(aligner.py)"]
+    end
+    N -->|micrograph| B
+    PR -.ground-truth coordinates.-> CMP["GET /results/{id}/micrograph<br/>picks overlaid on ground truth"]
+    PK -.-> CMP
+    API["FastAPI: /simulate, /process,<br/>/status, /results (api/)"] -.jobs.-> SIM
+    API -.jobs.-> PROC
+```
+
 ---
 
 ## Project structure
@@ -79,6 +97,15 @@ W(k) = CTF(k) / (CTF(k)² + 1/SNR)
 ```
 
 Lower SNR → heavier regularisation → smoother correction.
+
+![CTF against spatial frequency, and the Wiener filter for three SNR estimates](docs/figures/ctf_wiener.svg)
+
+*Top: the CTF at the default simulation settings, with the default bandpass range shaded (its upper
+edge coincides with the Nyquist frequency at 2 Å/pixel). Bottom: the Wiener filter for the pipeline's
+default SNR estimate (0.1) and two larger values. At 0.1 the regularisation term dominates, so
+W(k) ≈ 0.1 · CTF(k): the correction mainly flips the sign of the negative CTF lobes and rescales,
+rather than amplifying frequencies between the zeros. Computed with `simulator.ctf.compute_ctf_2d`
+by [`docs/figures/make_ctf_figure.py`](docs/figures/make_ctf_figure.py).*
 
 ---
 
