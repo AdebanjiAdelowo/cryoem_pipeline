@@ -104,6 +104,60 @@ class TestPicker:
             assert 0.0 <= c <= 1.0
 
 
+class TestPickerNMS:
+    @staticmethod
+    def _two_blobs(gap: int) -> np.ndarray:
+        """A strong and a weaker Gaussian blob `gap` px apart on a flat background."""
+        yy, xx = np.mgrid[:128, :128]
+        g = lambda cy, cx, a: a * np.exp(-((yy - cy) ** 2 + (xx - cx) ** 2) / (2 * 4.0 ** 2))
+        return (g(64, 50, 1.0) + g(64, 50 + gap, 0.5)).astype(np.float32)
+
+    def test_default_has_no_suppression(self):
+        img = _make_micrograph(128)
+        a = pick_particles(img, threshold=0.01)
+        b = pick_particles(img, threshold=0.01, nms_radius=None)
+        assert a.coords == b.coords and a.sigmas == b.sigmas
+
+    def test_suppressed_picks_are_a_subset_and_separated(self):
+        img = _make_micrograph(128)
+        full = pick_particles(img, threshold=0.01)
+        nms = pick_particles(img, threshold=0.01, nms_radius=15)
+        assert set(nms.coords) <= set(full.coords)
+        c = np.array(nms.coords, float)
+        if len(c) > 1:
+            d = np.linalg.norm(c[:, None] - c[None], axis=2)
+            np.fill_diagonal(d, np.inf)
+            assert d.min() > 15
+
+    def test_keeps_the_stronger_of_two_nearby_blobs(self):
+        img = self._two_blobs(gap=14)
+        both = pick_particles(img, threshold=0.05, nms_radius=5)
+        one = pick_particles(img, threshold=0.05, nms_radius=20)
+        assert len(both.coords) == 2
+        assert len(one.coords) == 1
+        y, x = one.coords[0]
+        assert abs(y - 64) <= 1 and abs(x - 50) <= 1
+
+    def test_lists_stay_aligned_after_suppression(self):
+        pk = pick_particles(_make_micrograph(128), threshold=0.01, nms_radius=15)
+        assert len(pk.coords) == len(pk.confidences) == len(pk.sigmas)
+
+    def test_pipeline_default_on_readme_example(self):
+        """Regression check on the README example (seed 42): all 32 particles are still
+        found, and suppression cuts the 137 unsuppressed picks to 54."""
+        import warnings
+        from processor.pipeline import Pipeline, ProcessConfig
+        from simulator.generator import SimulationConfig, generate_micrograph
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            mic, truth = generate_micrograph(SimulationConfig(n_particles=100, seed=42))
+        assert ProcessConfig().nms_radius == 20.0
+        picks = np.array(Pipeline(ProcessConfig()).run(mic).picks.coords, float)
+        d = np.linalg.norm(picks[:, None] - np.array(truth, float)[None], axis=2)
+        assert len(picks) == 54
+        assert (d.min(axis=0) <= 10).all()  # every true particle has a pick within 10 px
+
+
 # ---------------------------------------------------------------------------
 # aligner
 # ---------------------------------------------------------------------------

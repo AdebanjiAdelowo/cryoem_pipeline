@@ -113,6 +113,7 @@ def _run_processing(job_id: str, params: ProcessParams) -> None:
             num_sigma=params.num_sigma,
             pick_threshold=params.pick_threshold,
             min_distance=params.min_distance,
+            nms_radius=params.nms_radius,
             box_size=sim_params.box_size,
             n_classes=params.n_classes,
             random_state=params.random_state,

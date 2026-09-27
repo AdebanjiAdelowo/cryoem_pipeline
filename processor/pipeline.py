@@ -61,6 +61,9 @@ class ProcessConfig:
     num_sigma: int = 10
     pick_threshold: float = 0.05
     min_distance: int = 10
+    nms_radius: Optional[float] = 20.0
+    """Non-maximum suppression radius [pixels], about one particle diameter;
+    None disables it (the picker's behaviour before this option existed)."""
 
     # --- class averaging ---
     box_size: int = 64
@@ -151,6 +154,7 @@ class Pipeline:
                 num_sigma=cfg.num_sigma,
                 threshold=cfg.pick_threshold,
                 min_distance=cfg.min_distance,
+                nms_radius=cfg.nms_radius,
             )
 
             # 4. Class averaging

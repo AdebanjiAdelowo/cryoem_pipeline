@@ -41,6 +41,7 @@ class ProcessParams(BaseModel):
     num_sigma: int = Field(10, ge=2, le=50)
     pick_threshold: float = Field(0.05, gt=0.0, le=1.0)
     min_distance: int = Field(10, ge=1)
+    nms_radius: Optional[float] = Field(20.0, gt=0.0)
     n_classes: int = Field(5, ge=1, le=50)
     random_state: Optional[int] = 42
 

@@ -9,8 +9,13 @@ multi-scale stack internally and returns (y, x, σ) triples.
 
 Post-processing:
   • Confidence score — the LoG response normalised to [0, 1].
-  • Min-distance deduplication — already handled by blob_log's peak-finding,
-    but we additionally honour an explicit min_distance parameter.
+  • blob_log's own overlap pruning, with the overlap fraction derived from
+    min_distance by a heuristic (it is not an exact centre-to-centre distance).
+  • Optional non-maximum suppression (nms_radius): detections are ranked by
+    their scale-normalised LoG response, and any detection within nms_radius
+    pixels of a stronger one is dropped. On CTF-modulated micrographs a single
+    particle otherwise yields several detections on its bright fringe lobes,
+    which are weaker than the detection at the particle centre.
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.ndimage import gaussian_laplace
 from skimage.feature import blob_log
 
 
@@ -47,6 +53,7 @@ def pick_particles(
     num_sigma: int = 10,
     threshold: float = 0.05,
     min_distance: int = 10,
+    nms_radius: float | None = None,
 ) -> PickResult:
     """
     Pick particles from a micrograph using blob_log.
@@ -59,8 +66,14 @@ def pick_particles(
     num_sigma    : number of intermediate scales to test
     threshold    : minimum normalised blob response (0–1 after internal
                    normalisation by skimage); lower = more picks
-    min_distance : minimum centre-to-centre distance in pixels between
-                   accepted picks (enforced via blob_log's overlap param)
+    min_distance : sets blob_log's overlap fraction via the heuristic
+                   1 - min_distance / (sqrt(2) * max_sigma); this merges
+                   overlapping blobs but does not guarantee a centre-to-centre
+                   distance
+    nms_radius   : if given, keep a detection only if no detection with a
+                   larger scale-normalised LoG response lies within this many
+                   pixels (about one particle diameter is a sensible value).
+                   None (the default) reproduces the unsuppressed picks.
 
     Returns
     -------
@@ -92,6 +105,9 @@ def pick_particles(
     if len(blobs) == 0:
         return PickResult(coords=[], confidences=[], sigmas=[])
 
+    if nms_radius is not None and len(blobs) > 1:
+        blobs = _suppress_non_maxima(img_norm, blobs, nms_radius)
+
     ys = blobs[:, 0].astype(int)
     xs = blobs[:, 1].astype(int)
     sigmas = blobs[:, 2].tolist()
@@ -111,3 +127,31 @@ def pick_particles(
 
     coords = list(zip(ys.tolist(), xs.tolist()))
     return PickResult(coords=coords, confidences=confidences, sigmas=sigmas)
+
+
+def _log_response(img: np.ndarray, blobs: np.ndarray) -> np.ndarray:
+    """Scale-normalised LoG response -sigma^2 * LoG(img) at each (y, x, sigma).
+
+    Positive for bright blobs, matching what blob_log detects. The filtered
+    image is computed once per distinct sigma.
+    """
+    response = np.empty(len(blobs))
+    for sigma in np.unique(blobs[:, 2]):
+        rows = np.nonzero(blobs[:, 2] == sigma)[0]
+        log_img = -(sigma ** 2) * gaussian_laplace(img, sigma)
+        ys = np.clip(blobs[rows, 0].astype(int), 0, img.shape[0] - 1)
+        xs = np.clip(blobs[rows, 1].astype(int), 0, img.shape[1] - 1)
+        response[rows] = log_img[ys, xs]
+    return response
+
+
+def _suppress_non_maxima(img: np.ndarray, blobs: np.ndarray, radius: float) -> np.ndarray:
+    """Greedy NMS: visit blobs by decreasing LoG response, keep one unless a kept
+    blob lies within `radius` pixels. Kept blobs are returned in their original order."""
+    order = np.argsort(-_log_response(img, blobs), kind="stable")
+    kept: list[int] = []
+    for i in order:
+        d = np.hypot(blobs[kept, 0] - blobs[i, 0], blobs[kept, 1] - blobs[i, 1])
+        if not kept or d.min() > radius:
+            kept.append(i)
+    return blobs[np.sort(kept)]
