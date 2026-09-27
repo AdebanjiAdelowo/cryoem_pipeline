@@ -4,14 +4,18 @@ Unit tests for the simulator package.
 Run with:  pytest tests/ -v
 """
 
+import warnings
+
 import numpy as np
 import pytest
 
 from simulator.ctf import apply_ctf, compute_ctf_2d, electron_wavelength
 from simulator.generator import (
+    PlacementSaturationWarning,
     SimulationConfig,
     generate_micrograph,
     generate_particle_stack,
+    run_simulation,
 )
 from simulator.noise import add_gaussian_noise, add_noise, add_poisson_noise
 from simulator.projector import make_particle_volume, project, random_rotation_matrix
@@ -164,3 +168,56 @@ class TestGenerator:
         mic2, c2 = generate_micrograph(self.cfg)
         assert np.allclose(mic1, mic2)
         assert c1 == c2
+
+
+# ---------------------------------------------------------------------------
+# Particle placement: requested vs. placed counts
+# ---------------------------------------------------------------------------
+
+class TestPlacement:
+    # 10 boxes of 32 px fit easily on a 256 px micrograph
+    FEASIBLE = dict(n_particles=10, box_size=32, micrograph_size=256, seed=42)
+    # the README example: random placement jams at 32 of 100 for 64 px boxes on 512 px
+    SATURATED = dict(n_particles=100, box_size=64, micrograph_size=512, seed=42)
+
+    def test_all_requested_particles_placed_without_warning(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", PlacementSaturationWarning)
+            _, coords = generate_micrograph(SimulationConfig(**self.FEASIBLE))
+        assert len(coords) == self.FEASIBLE["n_particles"]
+
+    def test_saturation_warns_and_places_fewer(self):
+        with pytest.warns(PlacementSaturationWarning, match="placed 32 of 100"):
+            _, coords = generate_micrograph(SimulationConfig(**self.SATURATED))
+        assert len(coords) == 32
+
+    def test_placed_particles_do_not_overlap(self):
+        with pytest.warns(PlacementSaturationWarning):
+            _, coords = generate_micrograph(SimulationConfig(**self.SATURATED))
+        box = self.SATURATED["box_size"]
+        c = np.array(coords)
+        cheb = np.abs(c[:, None, :] - c[None, :, :]).max(axis=2)
+        np.fill_diagonal(cheb, box)
+        assert cheb.min() >= box
+
+    @pytest.mark.parametrize("kind", ["FEASIBLE", "SATURATED"])
+    def test_run_simulation_counts_are_consistent(self, kind, tmp_path):
+        params = getattr(self, kind)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", PlacementSaturationWarning)
+            result = run_simulation(SimulationConfig(**params), str(tmp_path))
+        assert result["n_particles_requested"] == params["n_particles"]
+        assert result["n_particles_placed"] == len(result["ground_truth_coords"])
+        assert result["n_particles_placed"] <= result["n_particles_requested"]
+        # backward compatibility: n_particles is still the particle-stack size
+        assert result["n_particles"] == params["n_particles"]
+
+    def test_warning_does_not_change_the_micrograph(self):
+        # placement consumes the RNG identically with or without the warning filter
+        cfg = SimulationConfig(**self.SATURATED)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            m1, c1 = generate_micrograph(cfg)
+        with pytest.warns(PlacementSaturationWarning):
+            m2, c2 = generate_micrograph(cfg)
+        assert np.array_equal(m1, m2) and c1 == c2

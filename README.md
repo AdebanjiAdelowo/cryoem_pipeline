@@ -120,8 +120,8 @@ picker.
 
 *Top left: the simulated 512 × 512 micrograph. 100 particles were requested but only 32 were placed:
 the non-overlap placement saturates at roughly 28 to 35 particles for a 64 px box on this micrograph
-(seeds 0 to 9), so any request above about 30 is silently capped. Top right: after bandpass and Wiener
-filtering, with ground-truth centres (circles) and LoG picks (crosses). Matching each pick to at most
+(seeds 0 to 9), so any request above about 30 is capped, with a `PlacementSaturationWarning`. Top
+right: after bandpass and Wiener filtering, with ground-truth centres (circles) and LoG picks (crosses). Matching each pick to at most
 one true centre within 10 px, all 32 particles are found (recall 1.00), but 137 picks are made, so
 precision is 0.23; the same values hold for matching radii of 10 to 32 px. Of the 105 unmatched picks,
 93 lie within half a box (32 px) of a true particle, consistent with repeated detections on each
@@ -230,6 +230,9 @@ proc = pipeline.run(mic)
 print(f"Picked {proc.n_picked} particles → {proc.n_classes} classes")
 ```
 
-`result["n_particles"]` is the size of the separate particle stack (always the requested count). The
-number of particles actually placed in the micrograph is `len(result["ground_truth_coords"])` (32 for
-this example); the REST API reports it as `n_particles_placed`.
+`result["n_particles_requested"]` and `result["n_particles_placed"]` give the requested count and the
+number actually placed in the micrograph (100 and 32 for this example; the placed centres are
+`result["ground_truth_coords"]`). When placement falls short, `generate_micrograph` issues a
+`PlacementSaturationWarning`. `result["n_particles"]` is kept for compatibility and is the size of the
+separate particle stack, which always equals the requested count. The REST status endpoint reports
+`n_particles_requested` and `n_particles_placed`.

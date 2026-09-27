@@ -191,6 +191,7 @@ async def status(job_id: str) -> StatusResponse:
         job_id=job_id,
         status=job["status"],
         sim_params=job.get("sim_params"),
+        n_particles_requested=job["sim_params"].n_particles if job.get("sim_params") else None,
         n_particles_placed=len(job["coords"]) if job.get("coords") is not None else None,
         n_picked=len(picks.coords) if picks else None,
         n_classes=len(avg.class_averages) if avg else None,

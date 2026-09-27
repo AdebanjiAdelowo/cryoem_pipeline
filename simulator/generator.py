@@ -12,6 +12,7 @@ images for quick visual inspection.
 """
 
 import os
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -28,6 +29,15 @@ from .projector import make_particle_volume, project, random_rotation_matrix
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
+
+class PlacementSaturationWarning(UserWarning):
+    """Fewer particles were placed in the micrograph than were requested.
+
+    Non-overlapping random placement jams well below the requested count once
+    the micrograph is crowded (about 32 particles for a 64 px box on a 512 px
+    micrograph); more attempts do not help, so the shortfall is reported instead.
+    """
+
 
 @dataclass
 class SimulationConfig:
@@ -81,7 +91,9 @@ def _place_particles(
     Sample non-overlapping (y, x) centre coordinates for particles.
 
     A simple rejection-sampling loop: each candidate is rejected if it
-    overlaps (within one box_size) with any already-placed particle.
+    overlaps (within one box_size) with any already-placed particle. The loop
+    stops after n_particles * 200 candidates, so fewer than n_particles
+    centres are returned when the micrograph cannot fit them.
     """
     margin = box_size // 2 + 4
     coords: list[tuple[int, int]] = []
@@ -123,7 +135,9 @@ def generate_micrograph(
     Returns
     -------
     micrograph : (H, W) float32 array
-    coords     : list of (y, x) ground-truth particle centres
+    coords     : list of (y, x) ground-truth particle centres. May be shorter
+                 than config.n_particles; a PlacementSaturationWarning is
+                 issued when it is.
     """
     rng = np.random.default_rng(config.seed)
     volume = make_particle_volume(config.box_size)
@@ -159,6 +173,14 @@ def generate_micrograph(
         config.voltage_kv, config.cs_mm,
     )
     micrograph = add_noise(micrograph, config.snr, config.add_poisson, rng=rng)
+    if len(placed) < config.n_particles:
+        warnings.warn(
+            f"placed {len(placed)} of {config.n_particles} requested particles: "
+            f"a {config.micrograph_size} px micrograph cannot fit more non-overlapping "
+            f"{config.box_size} px boxes with random placement",
+            PlacementSaturationWarning,
+            stacklevel=2,
+        )
     return micrograph, placed
 
 
@@ -278,7 +300,12 @@ def run_simulation(config: SimulationConfig, output_dir: str) -> dict:
     -------
     result : dict with keys
         micrograph_mrc, micrograph_png, particles_mrc, particles_png,
-        n_particles, ground_truth_coords
+        n_particles_requested : config.n_particles
+        n_particles_placed    : particles actually placed in the micrograph
+                                (= len(ground_truth_coords); may be fewer)
+        ground_truth_coords   : (y, x) centres of the placed particles
+        n_particles           : size of the separate particle stack (always the
+                                requested count); kept for backward compatibility
     """
     os.makedirs(output_dir, exist_ok=True)
 
@@ -299,6 +326,8 @@ def run_simulation(config: SimulationConfig, output_dir: str) -> dict:
 
     return {
         **paths,
-        "n_particles":        len(stack),
-        "ground_truth_coords": [(int(y), int(x)) for y, x in coords],
+        "n_particles_requested": config.n_particles,
+        "n_particles_placed":    len(coords),
+        "ground_truth_coords":   [(int(y), int(x)) for y, x in coords],
+        "n_particles":           len(stack),
     }

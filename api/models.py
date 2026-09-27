@@ -66,6 +66,7 @@ class StatusResponse(BaseModel):
     job_id: str
     status: JobStatus
     sim_params: Optional[SimulationParams] = None
+    n_particles_requested: Optional[int] = None
     n_particles_placed: Optional[int] = None
     n_picked: Optional[int] = None
     n_classes: Optional[int] = None
