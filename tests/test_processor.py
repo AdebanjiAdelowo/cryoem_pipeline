@@ -138,6 +138,14 @@ class TestPickerNMS:
         y, x = one.coords[0]
         assert abs(y - 64) <= 1 and abs(x - 50) <= 1
 
+    @pytest.mark.parametrize("gap, expected", [(14, 1), (17, 1), (19, 1), (22, 2), (26, 2), (30, 2)])
+    def test_radius_merges_only_within_its_distance(self, gap, expected):
+        """Two separated blobs: nms_radius=20 keeps one within 20 px and both beyond it. See
+        benchmarks/nms_separation.py for the same question on simulated particles."""
+        img = self._two_blobs(gap=gap)
+        assert len(pick_particles(img, threshold=0.05).coords) == 2  # both detected without suppression
+        assert len(pick_particles(img, threshold=0.05, nms_radius=20).coords) == expected
+
     def test_lists_stay_aligned_after_suppression(self):
         pk = pick_particles(_make_micrograph(128), threshold=0.01, nms_radius=15)
         assert len(pk.coords) == len(pk.confidences) == len(pk.sigmas)

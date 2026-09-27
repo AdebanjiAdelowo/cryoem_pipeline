@@ -54,7 +54,8 @@ cryoem_pipeline/
 │   ├── routes.py     : FastAPI route handlers
 │   └── main.py       : FastAPI app with CORS
 ├── benchmarks/
-│   └── picker_benchmark.py : picker precision/recall on held-out synthetic micrographs
+│   ├── picker_benchmark.py : picker precision/recall on held-out synthetic micrographs
+│   └── nms_separation.py   : recall of two particles against their separation, per suppression radius
 ├── tests/
 │   ├── test_simulator.py
 │   ├── test_api.py
@@ -154,6 +155,31 @@ recall is 0.80 to 0.82 with suppression against 0.86 to 0.88 without. Set `nms_r
 repository's own simulator, with well-separated particles; the numbers do not describe performance
 on real data or on crowded micrographs where particles touch.
 
+### Close neighbours: the suppression radius is also a resolution limit
+
+The simulator never places particles closer than one box (64 px), so the benchmark above cannot show
+whether suppression merges genuine neighbours. `benchmarks/nms_separation.py` answers that directly:
+two particles, built with the simulator's own projection, CTF and noise at the same particle density,
+are placed at a controlled separation, and the picker is run with different radii (50 trials per
+separation, [`benchmarks/nms_separation.txt`](benchmarks/nms_separation.txt)).
+
+![Recall of two true particles and picks per micrograph against their separation, for suppression radii from none to 30 px](docs/figures/nms_separation.png)
+
+*Recall is the fraction of the two true centres recovered within 10 px, averaged over 50 trials. The
+grey band marks the particle size. Pick counts are higher than in the full-size benchmark because
+the picker normalises intensities per image and these images are small; compare recall only.*
+
+With the default 20 px radius, both particles are found when their centres are at least 26 px apart
+(recall 0.98 or more), recall is 0.92 at 24 px and 0.67 to 0.87 at 20 to 22 px, and at 18 px or
+less typically one particle of the pair is lost (recall 0.5 to 0.66). Two particles touching each
+other (centres 15 to 19 px apart) are therefore often merged. A smaller radius does not fix this
+cheaply: the duplicate detections that suppression removes sit on each particle's CTF fringes 16 to
+24 px from its centre, the same distances as a touching neighbour. On the development micrographs
+(seeds 100 to 109, SNR 0.05 to 0.2) a 15 px radius keeps only a small part of the precision gain
+(precision 0.33 against 0.66 at 20 px and 0.26 without suppression), so the default stays at 20 px
+and this resolution limit is a known property of the picker. Suppression by distance alone cannot
+separate fringe duplicates from genuine close neighbours.
+
 ---
 
 ## Installation
@@ -230,7 +256,8 @@ The test suite covers:
   counts from `run_simulation` and the `/status` endpoint
 - Filters: bandpass DC suppression, Wiener shape/dtype
 - Picker: coordinate bounds, blob detection on planted signals, confidence range; suppression keeps
-  the stronger of two nearby blobs, enforces the radius, and leaves the README example's recall at 1
+  the stronger of two nearby blobs, enforces the radius, merges two blobs only within the radius
+  (gaps 14 to 30 px), and leaves the README example's recall at 1
 - Aligner: class average shape, label/size consistency, empty-input handling
 - Pipeline: status transitions (pending→running→done/failed)
 
