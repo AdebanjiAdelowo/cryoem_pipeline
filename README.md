@@ -153,15 +153,20 @@ Suppression can keep an off-centre detection instead of the central one: with a 
 recall is 0.80 to 0.82 with suppression against 0.86 to 0.88 without. Set `nms_radius=None` in
 `ProcessConfig` to recover the unsuppressed picks. These are synthetic micrographs from this
 repository's own simulator, with well-separated particles; the numbers do not describe performance
-on real data or on crowded micrographs where particles touch.
+on real data or on crowded micrographs where particles touch. The default picker does not reliably
+separate touching particles: in the exploratory experiment below, two particles whose centres are
+18 px apart or less typically come out as a single pick.
 
-### Close neighbours: the suppression radius is also a resolution limit
+### Exploratory: two particles at a controlled separation
 
-The simulator never places particles closer than one box (64 px), so the benchmark above cannot show
-whether suppression merges genuine neighbours. `benchmarks/nms_separation.py` answers that directly:
-two particles, built with the simulator's own projection, CTF and noise at the same particle density,
-are placed at a controlled separation, and the picker is run with different radii (50 trials per
-separation, [`benchmarks/nms_separation.txt`](benchmarks/nms_separation.txt)).
+The simulator never places particles closer than one box (64 px), so the held-out benchmark above
+cannot show whether suppression merges genuine neighbours. `benchmarks/nms_separation.py` is a
+separate, exploratory experiment rather than part of that benchmark: two particles, built with the
+simulator's own projection, CTF and noise at the same particle density, are placed at a controlled
+separation in a small 128 × 128 image, and the picker is run with different radii (SNR 0.1 only, 50
+trials per separation, [`benchmarks/nms_separation.txt`](benchmarks/nms_separation.txt)). It shows how
+recall depends on separation in this controlled setting; it is not a measure of performance on
+crowded micrographs.
 
 ![Recall of two true particles and picks per micrograph against their separation, for suppression radii from none to 30 px](docs/figures/nms_separation.png)
 
@@ -177,8 +182,9 @@ cheaply: the duplicate detections that suppression removes sit on each particle'
 24 px from its centre, the same distances as a touching neighbour. On the development micrographs
 (seeds 100 to 109, SNR 0.05 to 0.2) a 15 px radius keeps only a small part of the precision gain
 (precision 0.33 against 0.66 at 20 px and 0.26 without suppression), so the default stays at 20 px
-and this resolution limit is a known property of the picker. Suppression by distance alone cannot
-separate fringe duplicates from genuine close neighbours.
+and this resolution limit is a known property of the picker. In this setup, suppression by distance
+alone cannot separate fringe duplicates from genuine close neighbours; picking touching particles
+would need a different approach, such as template matching, which is not implemented.
 
 ---
 
